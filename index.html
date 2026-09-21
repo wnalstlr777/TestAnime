@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v19</title>
+<title>Three.js Stylized PBR Character Test v20</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v19</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v20</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
@@ -151,8 +151,8 @@ function setJoyFromEvent(e){
   const max=r.width*0.34;
   const len=Math.hypot(dx,dy);
   if(len>max){ dx=dx/len*max; dy=dy/len*max; }
-  analog.x=-dx/max;
-  analog.z=dy/max;
+  analog.x=dx/max;
+  analog.z=-dy/max;
   analog.active=Math.hypot(analog.x,analog.z)>0.12;
   joyStick.style.transform=`translate(${dx}px,${dy}px)`;
   updateAnim();
@@ -264,9 +264,14 @@ function updateMovement(dt){
     character.position.addScaledVector(worldDir,MOVE_SPEED*dt);
   }
 
-  // Static-world test:
-  // boxes, floor, camera and lights stay at fixed world coordinates.
-  // Only the character moves, so every box is physically reachable.
+  // Camera follows the character, but the WORLD stays fixed.
+  // Move only camera + OrbitControls target by the character's delta.
+  const delta=character.position.clone().sub(lastCharacterPos);
+  delta.y=0;
+  if(delta.lengthSq()>0){
+    camera.position.add(delta);
+    controls.target.add(delta);
+  }
   lastCharacterPos.copy(character.position);
 }
 
