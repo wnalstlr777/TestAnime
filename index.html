@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v12</title>
+<title>Three.js Stylized PBR Character Test v14</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
@@ -20,14 +20,14 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v12</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v14</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
 </div></div>
 
 <div id="joystickZone"><div id="joyBase"><div id="joyStick"></div></div></div>
-<button id="lightToggle">LIGHT UI</button>
+<button id="lightToggle">UI ✕</button>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
 </script>
@@ -152,7 +152,7 @@ function setJoyFromEvent(e){
   const len=Math.hypot(dx,dy);
   if(len>max){ dx=dx/len*max; dy=dy/len*max; }
   analog.x=dx/max;
-  analog.z=-dy/max;
+  analog.z=dy/max;
   analog.active=Math.hypot(analog.x,analog.z)>0.12;
   joyStick.style.transform=`translate(${dx}px,${dy}px)`;
   updateAnim();
@@ -175,34 +175,80 @@ joyZone.addEventListener('pointercancel',endJoy);
 
 const lightToggle=document.getElementById('lightToggle');
 const lightUI=document.getElementById('ui');
+let leftUIVisible=true;
+lightToggle.textContent='UI';
 lightToggle.addEventListener('click',()=>{
-  lightUI.classList.toggle('uiHidden');
-  lightToggle.textContent=lightUI.classList.contains('uiHidden')?'LIGHT ⚙':'LIGHT UI';
+  leftUIVisible=!leftUIVisible;
+  lightUI.style.setProperty('display', leftUIVisible ? 'block' : 'none', 'important');
+  lightToggle.textContent=leftUIVisible ? 'UI ✕' : 'UI ☰';
 });
 
-// Scatter colorful hexagonal columns around the play area.
+// Streaming square columns: sparse, random, and generated as the player explores.
 const obstacleGroup=new THREE.Group();
 scene.add(obstacleGroup);
 const obstaclePalette=[0xff6b6b,0xffc857,0x6bdb8a,0x5bbcff,0x9d7cff,0xff7ac8,0x62d7d1,0xff934f];
-for(let i=0;i<26;i++){
-  const radius=0.32+Math.random()*0.20;
-  const height=0.55+Math.random()*0.95;
-  const geo=new THREE.CylinderGeometry(radius,radius,height,6,1,false);
+const spawnedCells=new Set();
+const CELL=8.0;          // about 2x the previous visual spacing
+const SPAWN_RADIUS=2;    // cells around the player
+const DESPAWN_DISTANCE=34;
+
+function cellKey(cx,cz){ return `${cx},${cz}`; }
+
+function spawnCell(cx,cz){
+  const key=cellKey(cx,cz);
+  if(spawnedCells.has(key)) return;
+  spawnedCells.add(key);
+
+  // Not every cell gets a box, keeping mobile views sparse.
+  if(Math.random()>0.58) return;
+
+  const w=0.65+Math.random()*0.55;
+  const d=0.65+Math.random()*0.55;
+  const h=0.7+Math.random()*1.35;
+  const geo=new THREE.BoxGeometry(w,h,d);
   const mat=new THREE.MeshStandardMaterial({
     color:obstaclePalette[Math.floor(Math.random()*obstaclePalette.length)],
     roughness:.72, metalness:.02
   });
   const box=new THREE.Mesh(geo,mat);
-  const ring=2.4+Math.random()*10.5;
-  const ang=Math.random()*Math.PI*2;
-  box.position.set(Math.cos(ang)*ring,height/2,Math.sin(ang)*ring);
+  box.userData.cellKey=key;
+  box.position.set(
+    cx*CELL+(Math.random()-.5)*2.4,
+    h/2,
+    cz*CELL+(Math.random()-.5)*2.4
+  );
   box.rotation.y=Math.random()*Math.PI;
-  box.castShadow=true; box.receiveShadow=true;
+  box.castShadow=true;
+  box.receiveShadow=true;
   obstacleGroup.add(box);
+}
+
+function updateWorldStreaming(){
+  if(!character) return;
+  const cx=Math.round(character.position.x/CELL);
+  const cz=Math.round(character.position.z/CELL);
+
+  for(let x=cx-SPAWN_RADIUS;x<=cx+SPAWN_RADIUS;x++){
+    for(let z=cz-SPAWN_RADIUS;z<=cz+SPAWN_RADIUS;z++){
+      if(x===0 && z===0) continue;
+      spawnCell(x,z);
+    }
+  }
+
+  for(let i=obstacleGroup.children.length-1;i>=0;i--){
+    const o=obstacleGroup.children[i];
+    if(o.position.distanceTo(character.position)>DESPAWN_DISTANCE){
+      obstacleGroup.remove(o);
+      o.geometry.dispose();
+      o.material.dispose();
+      if(o.userData.cellKey) spawnedCells.delete(o.userData.cellKey);
+    }
+  }
 }
 
 function updateMovement(dt){
   if(!character)return;
+  updateWorldStreaming();
 
   if(!followReady){
     lastCharacterPos.copy(character.position);
