@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v25</title>
+<title>Three.js Stylized PBR Character Test v26</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v25</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v26</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
@@ -218,6 +218,26 @@ const fixedBoxPositions=[
 ];
 for(const [x,z] of fixedBoxPositions) makeFixedBox(x,z);
 
+// Simple player collision against the fixed box landmarks.
+// Character uses a small XZ circle; boxes use their world-space AABB.
+const PLAYER_RADIUS=0.42;
+
+function playerHitsObstacle(pos){
+  for(const box of obstacleGroup.children){
+    const halfX=(box.geometry.parameters.width||1)*0.5;
+    const halfZ=(box.geometry.parameters.depth||1)*0.5;
+
+    // Boxes may be rotated, so use a world-space Box3 for reliable bounds.
+    const bounds=new THREE.Box3().setFromObject(box);
+    const closestX=THREE.MathUtils.clamp(pos.x,bounds.min.x,bounds.max.x);
+    const closestZ=THREE.MathUtils.clamp(pos.z,bounds.min.z,bounds.max.z);
+    const dx=pos.x-closestX;
+    const dz=pos.z-closestZ;
+    if(dx*dx+dz*dz < PLAYER_RADIUS*PLAYER_RADIUS) return true;
+  }
+  return false;
+}
+
 function updateMovement(dt){
   if(!character)return;
 
@@ -255,13 +275,22 @@ function updateMovement(dt){
       .normalize();
 
     // Smoothly rotate toward the requested direction instead of snapping.
-    targetYaw=Math.atan2(worldDir.x,worldDir.z)+Math.PI;
+    targetYaw=Math.atan2(-worldDir.x,-worldDir.z);
     let diff=targetYaw-character.rotation.y;
     diff=Math.atan2(Math.sin(diff),Math.cos(diff));
     const turnBlend=1-Math.exp(-10*dt);
     character.rotation.y += diff*turnBlend;
 
-    character.position.addScaledVector(worldDir,MOVE_SPEED*dt);
+    const moveStep=worldDir.clone().multiplyScalar(MOVE_SPEED*dt);
+
+    // X and Z are tested separately so the player can slide along walls/boxes.
+    const tryX=character.position.clone();
+    tryX.x+=moveStep.x;
+    if(!playerHitsObstacle(tryX)) character.position.x=tryX.x;
+
+    const tryZ=character.position.clone();
+    tryZ.z+=moveStep.z;
+    if(!playerHitsObstacle(tryZ)) character.position.z=tryZ.z;
   }
 
   // Camera follows the character, but the WORLD stays fixed.
