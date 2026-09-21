@@ -3,21 +3,34 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v7</title>
+<title>Three.js Stylized PBR Character Test v11</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
 #light-ui label{display:flex;justify-content:space-between;gap:12px;margin-bottom:4px}
 #lightAngle{width:100%;accent-color:#65cbf1}
+
+#dpad{position:fixed;left:24px;bottom:24px;width:156px;height:156px;z-index:20;user-select:none;touch-action:none}
+.pad{position:absolute;width:52px;height:52px;border:1px solid rgba(255,255,255,.7);background:rgba(20,50,70,.38);color:#fff;border-radius:14px;font-size:24px;backdrop-filter:blur(4px)}
+.pad:active,.pad.active{background:rgba(255,255,255,.35)}
+#up{left:52px;top:0} #down{left:52px;bottom:0} #left{left:0;top:52px} #right{right:0;top:52px}
+@media(max-width:600px){#info{font-size:12px}#dpad{left:16px;bottom:18px}}
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v7</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v11</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
 </div></div>
+
+<div id="dpad">
+  <button class="pad" id="up">▲</button>
+  <button class="pad" id="left">◀</button>
+  <button class="pad" id="right">▶</button>
+  <button class="pad" id="down">▼</button>
+</div>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
 </script>
@@ -93,7 +106,112 @@ floor.rotation.x=-Math.PI/2; scene.add(floor);
 const shadowFloor=new THREE.Mesh(floorGeo,new THREE.ShadowMaterial({color:0x234b5a,opacity:0.24,transparent:true}));
 shadowFloor.rotation.x=-Math.PI/2; shadowFloor.position.y=0.002; shadowFloor.receiveShadow=true; scene.add(shadowFloor);
 
-let mixer=null;
+let mixer=null, character=null, idleAction=null, walkAction=null, currentAction=null;
+
+// --- simple game controls: D-pad + WASD / arrow keys ---
+const move={forward:false,back:false,left:false,right:false};
+const MOVE_SPEED=1.25, TURN_SPEED=2.2;
+const lastCharacterPos=new THREE.Vector3();
+let followReady=false;
+let targetYaw=0;
+
+function setAnim(next){
+  if(!next || next===currentAction) return;
+  next.reset().play();
+  if(currentAction) currentAction.crossFadeTo(next,0.28,true);
+  currentAction=next;
+}
+function updateAnim(){
+  const moving=move.forward||move.back||move.left||move.right;
+  setAnim(moving ? walkAction : idleAction);
+}
+const keyMap={
+  ArrowUp:'forward',KeyW:'forward',
+  ArrowDown:'back',KeyS:'back',
+  ArrowLeft:'left',KeyA:'left',
+  ArrowRight:'right',KeyD:'right'
+};
+window.addEventListener('keydown',e=>{
+  const k=keyMap[e.code]; if(!k)return;
+  move[k]=true; updateAnim(); e.preventDefault();
+});
+window.addEventListener('keyup',e=>{
+  const k=keyMap[e.code]; if(!k)return;
+  move[k]=false; updateAnim(); e.preventDefault();
+});
+function bindPad(id,key){
+  const el=document.getElementById(id);
+  const on=e=>{e.preventDefault();move[key]=true;el.classList.add('active');updateAnim();};
+  const off=e=>{e.preventDefault();move[key]=false;el.classList.remove('active');updateAnim();};
+  el.addEventListener('pointerdown',on);
+  el.addEventListener('pointerup',off);
+  el.addEventListener('pointercancel',off);
+  el.addEventListener('pointerleave',e=>{if(e.buttons)off(e);});
+}
+bindPad('up','forward'); bindPad('down','back'); bindPad('left','left'); bindPad('right','right');
+
+function updateMovement(dt){
+  if(!character)return;
+
+  if(!followReady){
+    lastCharacterPos.copy(character.position);
+    followReady=true;
+  }
+
+  // Game-style directional movement:
+  // Up/Down reverse instantly; Left/Right turn instantly to the new direction.
+  let x=0, z=0;
+  if(move.forward) z+=1;
+  if(move.back) z-=1;
+  if(move.left) x+=1;
+  if(move.right) x-=1;
+
+  if(x!==0 || z!==0){
+    const inputDir=new THREE.Vector3(x,0,z).normalize();
+
+    // Camera-relative controls. Up = visually forward on screen, Down = backward.
+    const camForward=new THREE.Vector3();
+    camera.getWorldDirection(camForward);
+    camForward.y=0;
+    if(camForward.lengthSq()<0.0001) camForward.set(0,0,-1);
+    camForward.normalize();
+    const camRight=new THREE.Vector3().crossVectors(camForward,new THREE.Vector3(0,1,0)).normalize();
+
+    // Fix the previous up/down inversion.
+    const worldDir=new THREE.Vector3()
+      .addScaledVector(camForward,-inputDir.z)
+      .addScaledVector(camRight,inputDir.x)
+      .normalize();
+
+    // Smoothly rotate toward the requested direction instead of snapping.
+    targetYaw=Math.atan2(worldDir.x,worldDir.z);
+    let diff=targetYaw-character.rotation.y;
+    diff=Math.atan2(Math.sin(diff),Math.cos(diff));
+    const turnBlend=1-Math.exp(-10*dt);
+    character.rotation.y += diff*turnBlend;
+
+    character.position.addScaledVector(worldDir,MOVE_SPEED*dt);
+  }
+
+  // Follow the character without fighting OrbitControls:
+  // move both camera and orbit target by exactly the character's world-space delta.
+  const delta=character.position.clone().sub(lastCharacterPos);
+  delta.y=0;
+  if(delta.lengthSq()>0){
+    camera.position.add(delta);
+    controls.target.add(delta);
+
+    // Keep the visual ground and key-light target under the character too.
+    floor.position.x=character.position.x;
+    floor.position.z=character.position.z;
+    shadowFloor.position.x=character.position.x;
+    shadowFloor.position.z=character.position.z;
+    key.target.position.x=character.position.x;
+    key.target.position.z=character.position.z;
+  }
+  lastCharacterPos.copy(character.position);
+}
+
 const clock=new THREE.Clock();
 new GLTFLoader().load('./TestAnime.glb',(gltf)=>{
   const model=gltf.scene;
@@ -121,13 +239,21 @@ new GLTFLoader().load('./TestAnime.glb',(gltf)=>{
 
   if(gltf.animations.length){
     mixer=new THREE.AnimationMixer(model);
-    const clip=gltf.animations.find(a=>/Retarget/i.test(a.name)) ?? gltf.animations[gltf.animations.length-1];
-    mixer.clipAction(clip).reset().play();
-    status.textContent=`OK · ${clip.name}`;
+    character=model;
+    lastCharacterPos.copy(character.position);
+    followReady=true;
+
+    const idleClip=THREE.AnimationClip.findByName(gltf.animations,'Idle');
+    const walkClip=THREE.AnimationClip.findByName(gltf.animations,'Walk');
+    if(idleClip) idleAction=mixer.clipAction(idleClip);
+    if(walkClip) walkAction=mixer.clipAction(walkClip);
+    if(idleAction){ idleAction.play(); currentAction=idleAction; }
+    status.textContent=`OK · Idle / Walk`;
   } else status.textContent='Model OK · Animation 없음';
 },undefined,(err)=>{console.error(err);status.textContent='GLB 로딩 실패 · Console 확인';});
 
-function animate(){requestAnimationFrame(animate);const dt=clock.getDelta();if(mixer)mixer.update(dt);controls.update();renderer.render(scene,camera);}animate();
+function animate(){requestAnimationFrame(animate);const dt=clock.getDelta();if(mixer)mixer.update(dt);
+  updateMovement(dt);controls.update();renderer.render(scene,camera);}animate();
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 </script>
 </body></html>
