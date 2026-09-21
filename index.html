@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Three.js Stylized PBR Character Test v7</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
+#light-ui{margin-top:8px;min-width:230px}
+#light-ui label{display:flex;justify-content:space-between;gap:12px;margin-bottom:4px}
+#lightAngle{width:100%;accent-color:#65cbf1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="info"><b>Stylized PBR v7</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="light-ui">
+<label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
+<input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
+</div></div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const app=document.querySelector('#app');
+const status=document.querySelector('#status');
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x65cbf1);
+
+const camera=new THREE.PerspectiveCamera(30,innerWidth/innerHeight,0.01,1000);
+camera.position.set(0,1.25,4.2);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.08;
+app.appendChild(renderer.domElement);
+
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.target.set(0,1.05,0);
+controls.enableDamping=true;
+controls.minDistance=1.45;
+controls.maxDistance=8;
+
+// Soft stylized-PBR lighting: broad front key + gentle fill + subtle rim.
+scene.add(new THREE.HemisphereLight(0xfff8f1,0x77708c,2.35));
+const key=new THREE.DirectionalLight(0xfff2e5,2.05);
+const keyHeight=5.5;
+const keyRadius=5.6;
+key.castShadow=true;
+key.shadow.mapSize.set(4096,4096); key.shadow.bias=-0.00015;
+key.shadow.camera.left=-12;key.shadow.camera.right=12;key.shadow.camera.top=12;key.shadow.camera.bottom=-12;
+key.shadow.camera.near=0.1;key.shadow.camera.far=40;
+scene.add(key);
+
+// Main-light azimuth control. 0° = current front-side direction.
+// Rotate this slider until the cast shadow falls exactly where you want.
+const lightAngle=document.querySelector('#lightAngle');
+const angleValue=document.querySelector('#angleValue');
+function updateKeyLight(){
+  const deg=Number(lightAngle.value);
+  const rad=THREE.MathUtils.degToRad(deg);
+  const base=Math.atan2(0.8,5.5);
+  key.position.set(
+    Math.sin(base+rad)*keyRadius,
+    keyHeight,
+    Math.cos(base+rad)*keyRadius
+  );
+  key.target.position.set(0,1.0,0);
+  scene.add(key.target);
+  angleValue.textContent=`${deg}°`;
+}
+lightAngle.addEventListener('input',updateKeyLight);
+updateKeyLight();
+const fill=new THREE.DirectionalLight(0xe8e2ff,0.8); fill.position.set(-3,2.5,4); scene.add(fill);
+const rim=new THREE.DirectionalLight(0xb9c9ff,0.55); rim.position.set(-3.5,3,-4); scene.add(rim);
+
+const floorGeo=new THREE.CircleGeometry(3.6,96);
+// Base floor is unlit so it matches the background color exactly.
+const floorMat=new THREE.MeshBasicMaterial({color:0x65cbf1});
+floorMat.toneMapped=false;
+const floor=new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2; scene.add(floor);
+// Separate transparent receiver keeps the exact floor color while still showing shadows.
+const shadowFloor=new THREE.Mesh(floorGeo,new THREE.ShadowMaterial({color:0x234b5a,opacity:0.24,transparent:true}));
+shadowFloor.rotation.x=-Math.PI/2; shadowFloor.position.y=0.002; shadowFloor.receiveShadow=true; scene.add(shadowFloor);
+
+let mixer=null;
+const clock=new THREE.Clock();
+new GLTFLoader().load('./TestAnime.glb',(gltf)=>{
+  const model=gltf.scene;
+  scene.add(model);
+  model.traverse(o=>{
+    if(!o.isMesh) return;
+    o.castShadow=true; o.receiveShadow=true;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    mats.forEach(m=>{
+      if(!m) return;
+      // Keep original GLB PBR/textures. Only soften response where supported.
+      if('roughness' in m) m.roughness=Math.max(m.roughness ?? 0.5,0.62);
+      if('metalness' in m) m.metalness=Math.min(m.metalness ?? 0,0.05);
+      m.needsUpdate=true;
+    });
+  });
+
+  const box=new THREE.Box3().setFromObject(model);
+  const size=box.getSize(new THREE.Vector3());
+  const center=box.getCenter(new THREE.Vector3());
+  model.position.x-=center.x; model.position.z-=center.z; model.position.y-=box.min.y;
+  controls.target.set(0,Math.max(size.y*0.54,0.7),0);
+  camera.position.set(0,Math.max(size.y*0.57,1),Math.max(size.y*1.75,3));
+  controls.update();
+
+  if(gltf.animations.length){
+    mixer=new THREE.AnimationMixer(model);
+    const clip=gltf.animations.find(a=>/Retarget/i.test(a.name)) ?? gltf.animations[gltf.animations.length-1];
+    mixer.clipAction(clip).reset().play();
+    status.textContent=`OK · ${clip.name}`;
+  } else status.textContent='Model OK · Animation 없음';
+},undefined,(err)=>{console.error(err);status.textContent='GLB 로딩 실패 · Console 확인';});
+
+function animate(){requestAnimationFrame(animate);const dt=clock.getDelta();if(mixer)mixer.update(dt);controls.update();renderer.render(scene,camera);}animate();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script>
+</body></html>
