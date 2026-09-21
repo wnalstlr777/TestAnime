@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v18</title>
+<title>Three.js Stylized PBR Character Test v19</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
@@ -20,7 +20,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;fon
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v18</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v19</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
@@ -212,9 +212,9 @@ function makeFixedBox(x,z){
 // Sparse fixed landmarks around the starting area.
 // Keep the center clear so the player can walk around and reach every box.
 const fixedBoxPositions=[
-  [-8,-6],[7,-8],[13,-2],[-14,1],
-  [-7,8],[6,9],[15,8],[-15,11],
-  [2,16],[-5,-17],[17,-14],[-18,-10]
+  [-3,-2],[3,-2],[-4,2],[4,2],
+  [-2,5],[2,5],[-5,6],[5,6],
+  [0,-5],[-6,-3],[6,-3],[0,8]
 ];
 for(const [x,z] of fixedBoxPositions) makeFixedBox(x,z);
 
@@ -264,22 +264,9 @@ function updateMovement(dt){
     character.position.addScaledVector(worldDir,MOVE_SPEED*dt);
   }
 
-  // Follow the character without fighting OrbitControls:
-  // move both camera and orbit target by exactly the character's world-space delta.
-  const delta=character.position.clone().sub(lastCharacterPos);
-  delta.y=0;
-  if(delta.lengthSq()>0){
-    camera.position.add(delta);
-    controls.target.add(delta);
-
-    // Keep the visual ground and key-light target under the character too.
-    floor.position.x=character.position.x;
-    floor.position.z=character.position.z;
-    shadowFloor.position.x=character.position.x;
-    shadowFloor.position.z=character.position.z;
-    key.target.position.x=character.position.x;
-    key.target.position.z=character.position.z;
-  }
+  // Static-world test:
+  // boxes, floor, camera and lights stay at fixed world coordinates.
+  // Only the character moves, so every box is physically reachable.
   lastCharacterPos.copy(character.position);
 }
 
