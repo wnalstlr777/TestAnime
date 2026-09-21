@@ -3,34 +3,31 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js Stylized PBR Character Test v11</title>
+<title>Three.js Stylized PBR Character Test v12</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#65cbf1;font-family:Arial,sans-serif}#app{width:100%;height:100%}#info{position:fixed;left:14px;top:14px;padding:10px 12px;background:#1b1725c9;color:#fff;border-radius:9px;font-size:13px;line-height:1.5;z-index:2;backdrop-filter:blur(5px)}#status{color:#bdeaff}
 #light-ui{margin-top:8px;min-width:230px}
 #light-ui label{display:flex;justify-content:space-between;gap:12px;margin-bottom:4px}
 #lightAngle{width:100%;accent-color:#65cbf1}
 
-#dpad{position:fixed;left:24px;bottom:24px;width:156px;height:156px;z-index:20;user-select:none;touch-action:none}
-.pad{position:absolute;width:52px;height:52px;border:1px solid rgba(255,255,255,.7);background:rgba(20,50,70,.38);color:#fff;border-radius:14px;font-size:24px;backdrop-filter:blur(4px)}
-.pad:active,.pad.active{background:rgba(255,255,255,.35)}
-#up{left:52px;top:0} #down{left:52px;bottom:0} #left{left:0;top:52px} #right{right:0;top:52px}
-@media(max-width:600px){#info{font-size:12px}#dpad{left:16px;bottom:18px}}
+#joystickZone{position:fixed;left:18px;bottom:18px;width:150px;height:150px;z-index:30;touch-action:none;user-select:none}
+#joyBase{position:absolute;inset:15px;border-radius:50%;background:rgba(18,45,62,.26);border:1px solid rgba(255,255,255,.38);backdrop-filter:blur(4px)}
+#joyStick{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px;border-radius:50%;background:rgba(255,255,255,.58);border:1px solid rgba(255,255,255,.8);box-shadow:0 4px 18px rgba(0,0,0,.18);transform:translate(0,0)}
+#lightToggle{position:fixed;right:12px;top:12px;z-index:40;border:0;border-radius:12px;padding:9px 12px;background:rgba(10,28,38,.62);color:#fff;font-weight:700;backdrop-filter:blur(6px)}
+#ui.uiHidden{display:none}
+@media(max-width:600px){#info{font-size:11px;max-width:55vw}#joystickZone{left:10px;bottom:12px;width:138px;height:138px}#lightToggle{font-size:12px;padding:8px 10px}}
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div id="info"><b>Stylized PBR v11</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
+<div id="info"><b>Stylized PBR v12</b><br><span id="status">Loading...</span><br>Drag: 회전 / Wheel: 줌
 <div id="light-ui">
 <label for="lightAngle">Main Light 회전 <span id="angleValue">0°</span></label>
 <input id="lightAngle" type="range" min="-180" max="180" value="0" step="1">
 </div></div>
 
-<div id="dpad">
-  <button class="pad" id="up">▲</button>
-  <button class="pad" id="left">◀</button>
-  <button class="pad" id="right">▶</button>
-  <button class="pad" id="down">▼</button>
-</div>
+<div id="joystickZone"><div id="joyBase"><div id="joyStick"></div></div></div>
+<button id="lightToggle">LIGHT UI</button>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
 </script>
@@ -110,6 +107,7 @@ let mixer=null, character=null, idleAction=null, walkAction=null, currentAction=
 
 // --- simple game controls: D-pad + WASD / arrow keys ---
 const move={forward:false,back:false,left:false,right:false};
+const analog={x:0,z:0,active:false};
 const MOVE_SPEED=1.25, TURN_SPEED=2.2;
 const lastCharacterPos=new THREE.Vector3();
 let followReady=false;
@@ -122,7 +120,7 @@ function setAnim(next){
   currentAction=next;
 }
 function updateAnim(){
-  const moving=move.forward||move.back||move.left||move.right;
+  const moving=analog.active || move.forward||move.back||move.left||move.right;
   setAnim(moving ? walkAction : idleAction);
 }
 const keyMap={
@@ -139,16 +137,69 @@ window.addEventListener('keyup',e=>{
   const k=keyMap[e.code]; if(!k)return;
   move[k]=false; updateAnim(); e.preventDefault();
 });
-function bindPad(id,key){
-  const el=document.getElementById(id);
-  const on=e=>{e.preventDefault();move[key]=true;el.classList.add('active');updateAnim();};
-  const off=e=>{e.preventDefault();move[key]=false;el.classList.remove('active');updateAnim();};
-  el.addEventListener('pointerdown',on);
-  el.addEventListener('pointerup',off);
-  el.addEventListener('pointercancel',off);
-  el.addEventListener('pointerleave',e=>{if(e.buttons)off(e);});
+
+
+
+// Floating analog joystick: press anywhere in the pad, then drag continuously.
+const joyZone=document.getElementById('joystickZone');
+const joyStick=document.getElementById('joyStick');
+let joyPointer=null;
+function setJoyFromEvent(e){
+  const r=joyZone.getBoundingClientRect();
+  const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  let dx=e.clientX-cx, dy=e.clientY-cy;
+  const max=r.width*0.34;
+  const len=Math.hypot(dx,dy);
+  if(len>max){ dx=dx/len*max; dy=dy/len*max; }
+  analog.x=dx/max;
+  analog.z=-dy/max;
+  analog.active=Math.hypot(analog.x,analog.z)>0.12;
+  joyStick.style.transform=`translate(${dx}px,${dy}px)`;
+  updateAnim();
 }
-bindPad('up','forward'); bindPad('down','back'); bindPad('left','left'); bindPad('right','right');
+joyZone.addEventListener('pointerdown',e=>{
+  joyPointer=e.pointerId; joyZone.setPointerCapture(e.pointerId);
+  setJoyFromEvent(e); e.preventDefault();
+});
+joyZone.addEventListener('pointermove',e=>{
+  if(e.pointerId!==joyPointer)return;
+  setJoyFromEvent(e); e.preventDefault();
+});
+function endJoy(e){
+  if(joyPointer!==null && e.pointerId!==joyPointer)return;
+  joyPointer=null; analog.x=0; analog.z=0; analog.active=false;
+  joyStick.style.transform='translate(0,0)'; updateAnim();
+}
+joyZone.addEventListener('pointerup',endJoy);
+joyZone.addEventListener('pointercancel',endJoy);
+
+const lightToggle=document.getElementById('lightToggle');
+const lightUI=document.getElementById('ui');
+lightToggle.addEventListener('click',()=>{
+  lightUI.classList.toggle('uiHidden');
+  lightToggle.textContent=lightUI.classList.contains('uiHidden')?'LIGHT ⚙':'LIGHT UI';
+});
+
+// Scatter colorful hexagonal columns around the play area.
+const obstacleGroup=new THREE.Group();
+scene.add(obstacleGroup);
+const obstaclePalette=[0xff6b6b,0xffc857,0x6bdb8a,0x5bbcff,0x9d7cff,0xff7ac8,0x62d7d1,0xff934f];
+for(let i=0;i<26;i++){
+  const radius=0.32+Math.random()*0.20;
+  const height=0.55+Math.random()*0.95;
+  const geo=new THREE.CylinderGeometry(radius,radius,height,6,1,false);
+  const mat=new THREE.MeshStandardMaterial({
+    color:obstaclePalette[Math.floor(Math.random()*obstaclePalette.length)],
+    roughness:.72, metalness:.02
+  });
+  const box=new THREE.Mesh(geo,mat);
+  const ring=2.4+Math.random()*10.5;
+  const ang=Math.random()*Math.PI*2;
+  box.position.set(Math.cos(ang)*ring,height/2,Math.sin(ang)*ring);
+  box.rotation.y=Math.random()*Math.PI;
+  box.castShadow=true; box.receiveShadow=true;
+  obstacleGroup.add(box);
+}
 
 function updateMovement(dt){
   if(!character)return;
@@ -160,11 +211,14 @@ function updateMovement(dt){
 
   // Game-style directional movement:
   // Up/Down reverse instantly; Left/Right turn instantly to the new direction.
-  let x=0, z=0;
-  if(move.forward) z+=1;
-  if(move.back) z-=1;
-  if(move.left) x+=1;
-  if(move.right) x-=1;
+  let x=analog.active ? analog.x : 0;
+  let z=analog.active ? analog.z : 0;
+  if(!analog.active){
+    if(move.forward) z+=1;
+    if(move.back) z-=1;
+    if(move.left) x+=1;
+    if(move.right) x-=1;
+  }
 
   if(x!==0 || z!==0){
     const inputDir=new THREE.Vector3(x,0,z).normalize();
